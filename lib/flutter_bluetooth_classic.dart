@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import 'package:flutter/services.dart';
 
 class FlutterBluetoothClassic {
@@ -20,12 +21,19 @@ class FlutterBluetoothClassic {
   final _connectionStreamController =
       StreamController<BluetoothConnectionState>.broadcast();
   final _dataStreamController = StreamController<BluetoothData>.broadcast();
+  final _deviceDiscoveryStreamController =
+      StreamController<BluetoothDevice>.broadcast();
 
   // Public streams that can be subscribed to
   Stream<BluetoothState> get onStateChanged => _stateStreamController.stream;
+
   Stream<BluetoothConnectionState> get onConnectionChanged =>
       _connectionStreamController.stream;
+
   Stream<BluetoothData> get onDataReceived => _dataStreamController.stream;
+
+  Stream<BluetoothDevice> get onDeviceDiscovered =>
+      _deviceDiscoveryStreamController.stream;
 
   /// Factory constructor to maintain a single instance of the class
   factory FlutterBluetoothClassic() {
@@ -37,7 +45,17 @@ class FlutterBluetoothClassic {
   FlutterBluetoothClassic._() {
     // Listen for state changes
     _stateChannel.receiveBroadcastStream().listen((dynamic event) {
-      _stateStreamController.add(BluetoothState.fromMap(event));
+      final eventMap = event.cast<String, dynamic>();
+
+      // Check if this is a device discovery event
+      if (eventMap.containsKey('event') && eventMap['event'] == 'deviceFound') {
+        final deviceMap = eventMap['device'] as Map<String, dynamic>;
+        _deviceDiscoveryStreamController
+            .add(BluetoothDevice.fromMap(deviceMap));
+      } else {
+        // Regular Bluetooth state event
+        _stateStreamController.add(BluetoothState.fromMap(event));
+      }
     });
 
     // Listen for connection changes
@@ -89,6 +107,17 @@ class FlutterBluetoothClassic {
     }
   }
 
+  /// Get discovered devices from the last discovery session
+  Future<List<BluetoothDevice>> getDiscoveredDevices() async {
+    try {
+      final List<dynamic> devices =
+          await _channel.invokeMethod('getDiscoveredDevices');
+      return devices.map((device) => BluetoothDevice.fromMap(device)).toList();
+    } catch (e) {
+      throw BluetoothException('Failed to get discovered devices: $e');
+    }
+  }
+
   /// Start discovery for nearby Bluetooth devices
   Future<bool> startDiscovery() async {
     try {
@@ -137,7 +166,7 @@ class FlutterBluetoothClassic {
   /// Send string data to the connected device
   Future<bool> sendString(String message) async {
     try {
-      final List<int> data = utf8.encode(message);
+      final List<int> data = List<int>.from(utf8.encode(message));
       return await sendData(data);
     } catch (e) {
       throw BluetoothException('Failed to send string: $e');
@@ -149,6 +178,7 @@ class FlutterBluetoothClassic {
     _stateStreamController.close();
     _connectionStreamController.close();
     _dataStreamController.close();
+    _deviceDiscoveryStreamController.close();
   }
 }
 
